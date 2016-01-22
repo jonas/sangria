@@ -13,6 +13,7 @@ import sangria.introspection.{SchemaMetaField, TypeMetaField, TypeNameMetaField}
 import scala.annotation.implicitNotFound
 import scala.reflect.ClassTag
 
+import sangria.util.tag
 import sangria.util.tag._
 
 sealed trait Type
@@ -158,6 +159,24 @@ object ObjectType {
   def apply[Ctx, Val: ClassTag](name: String, description: String, interfaces: List[PossibleInterface[Ctx, Val]], fieldsFn: () ⇒ List[Field[Ctx, Val]]): ObjectType[Ctx, Val] =
     ObjectType(Named.checkName(name), Some(description), Named.checkObjFields(fieldsFn), interfaces map (_.interfaceType))
 
+  def subs[Ctx, Val: ClassTag](name: String, fields: List[Field[Ctx, Val]]): ObjectType[Ctx, Val] @@ SubscriptionTag[Int] =
+    tag[SubscriptionTag[Int]](ObjectType(Named.checkName(name), None, fieldsFn = Named.checkObjFieldsFn(fields), Nil))
+  def subs[Ctx, Val: ClassTag](name: String, description: String, fields: List[Field[Ctx, Val]]): ObjectType[Ctx, Val] =
+    tag[SubscriptionTag[Int]](ObjectType(Named.checkName(name), Some(description), fieldsFn = Named.checkObjFieldsFn(fields), Nil))
+  def subs[Ctx, Val: ClassTag](name: String, interfaces: List[PossibleInterface[Ctx, Val]], fields: List[Field[Ctx, Val]]): ObjectType[Ctx, Val] =
+    tag[SubscriptionTag[Int]](ObjectType(Named.checkName(name), None, fieldsFn = Named.checkObjFieldsFn(fields), interfaces map (_.interfaceType)))
+  def subs[Ctx, Val: ClassTag](name: String, description: String, interfaces: List[PossibleInterface[Ctx, Val]], fields: List[Field[Ctx, Val]]): ObjectType[Ctx, Val] =
+    tag[SubscriptionTag[Int]](ObjectType(Named.checkName(name), Some(description), fieldsFn = Named.checkObjFieldsFn(fields), interfaces map (_.interfaceType)))
+
+  def subs[Ctx, Val: ClassTag](name: String, fieldsFn: () ⇒ List[Field[Ctx, Val]]): ObjectType[Ctx, Val] =
+    tag[SubscriptionTag[Int]](ObjectType(Named.checkName(name), None, Named.checkObjFields(fieldsFn), Nil))
+  def subs[Ctx, Val: ClassTag](name: String, description: String, fieldsFn: () ⇒ List[Field[Ctx, Val]]): ObjectType[Ctx, Val] =
+    tag[SubscriptionTag[Int]](ObjectType(Named.checkName(name), Some(description), Named.checkObjFields(fieldsFn), Nil))
+  def subs[Ctx, Val: ClassTag](name: String, interfaces: List[PossibleInterface[Ctx, Val]], fieldsFn: () ⇒ List[Field[Ctx, Val]]): ObjectType[Ctx, Val] =
+    tag[SubscriptionTag[Int]](ObjectType(Named.checkName(name), None, Named.checkObjFields(fieldsFn), interfaces map (_.interfaceType)))
+  def subs[Ctx, Val: ClassTag](name: String, description: String, interfaces: List[PossibleInterface[Ctx, Val]], fieldsFn: () ⇒ List[Field[Ctx, Val]]): ObjectType[Ctx, Val] =
+    tag[SubscriptionTag[Int]](ObjectType(Named.checkName(name), Some(description), Named.checkObjFields(fieldsFn), interfaces map (_.interfaceType)))
+
   implicit def acceptUnitCtx[Ctx, Val](objectType: ObjectType[Unit, Val]): ObjectType[Ctx, Val] =
     objectType.asInstanceOf[ObjectType[Ctx, Val]]
 }
@@ -259,6 +278,19 @@ object Field {
       complexity: Option[(Ctx, Args, Double) ⇒ Double] = None,
       deprecationReason: Option[String] = None)(implicit ev: ValidOutType[Res, Out]) =
     Field[Ctx, Val](Named.checkName(name), fieldType, description, arguments, resolve, deprecationReason, tags, complexity, () ⇒ possibleTypes map (_.objectType))
+
+  def subs[Ctx, Val, Res, Out](
+      name: String,
+      fieldType: OutputType[Out],
+      description: Option[String] = None,
+      arguments: List[Argument[_]] = Nil,
+      resolve: Context[Ctx, Val] ⇒ Action[Ctx, Res],
+      possibleTypes: ⇒ List[PossibleObject[_, _]] = Nil,
+      tags: List[FieldTag] = Nil,
+      complexity: Option[(Ctx, Args, Double) ⇒ Double] = None,
+      deprecationReason: Option[String] = None)(implicit ev: ValidOutType[Res, Out]) =
+    tag[SubscriptionTag[Int]](Field[Ctx, Val](Named.checkName(name), fieldType, description, arguments, resolve, deprecationReason, tags, complexity, () ⇒ possibleTypes map (_.objectType)))
+
 }
 
 @implicitNotFound(msg = "${Res} is invalid type for the resulting GraphQL type ${Out}.")
@@ -544,13 +576,13 @@ case class Directive(
   onFragment: Boolean,
   onField: Boolean) extends HasArguments
 
-case class Schema[Ctx, Val](
+case class Schema[Ctx, Val] private (
     query: ObjectType[Ctx, Val],
-    mutation: Option[ObjectType[Ctx, Val]] = None,
-    subscription: Option[ObjectType[Ctx, Val]] = None,
-    additionalTypes: List[Type with Named] = Nil,
-    directives: List[Directive] = BuiltinDirectives,
-    validationRules: List[SchemaValidationRule] = SchemaValidationRule.default) {
+    mutation: Option[ObjectType[Ctx, Val]],
+    subscription: Option[ObjectType[Ctx, Val]],
+    additionalTypes: List[Type with Named],
+    directives: List[Directive],
+    validationRules: List[SchemaValidationRule]) {
   lazy val types: Map[String, (Int, Type with Named)] = {
     def updated(priority: Int, name: String, tpe: Type with Named, result: Map[String, (Int, Type with Named)]) =
       if (result contains name) result else result.updated(name, priority → tpe)
@@ -661,4 +693,45 @@ case class Schema[Ctx, Val](
   val validationErrors = validationRules flatMap (_.validate(this))
 
   if (validationErrors.nonEmpty) throw SchemaValidationException(validationErrors)
+}
+
+object Schema {
+  def apply[Ctx, Val, ST <: ObjectType[Ctx, Val]](
+      query: ObjectType[Ctx, Val],
+      mutation: Option[ObjectType[Ctx, Val]] = None,
+      subscription: Option[ST] = None,
+      additionalTypes: List[Type with Named] = Nil,
+      directives: List[Directive] = BuiltinDirectives,
+      validationRules: List[SchemaValidationRule] = SchemaValidationRule.default)(implicit st: SchemaType[Ctx, Val, ST]): st.Result =
+    st.get(Schema[Ctx, Val](query, mutation, subscription, additionalTypes, directives, validationRules))
+}
+
+trait SubscriptionTag[T]
+
+trait SchemaType[Ctx, Val, +ST] {
+  type Result
+
+  def get(schema: Schema[Ctx, Val]): Result
+}
+
+object SchemaType extends SchemaTypeLowPrio {
+  implicit def defaultUndefined[Ctx, Val] = new SchemaType[Ctx, Val, Nothing] {
+    type Result = Schema[Ctx, Val]
+
+    def get(schema: Schema[Ctx, Val]) = schema
+  }
+}
+
+trait SchemaTypeLowPrio {
+  implicit def subscriptionObjectType[Ctx, Val, S] = new SchemaType[Ctx, Val, ObjectType[Ctx, Val] @@ SubscriptionTag[S]] {
+    type Result = Schema[Ctx, Val] @@ SubscriptionTag[S]
+
+    def get(schema: Schema[Ctx, Val]) = tag[SubscriptionTag[S]][Schema[Ctx, Val]](schema)
+  }
+
+  implicit def normalObjectType[Ctx, Val] = new SchemaType[Ctx, Val, ObjectType[Ctx, Val]] {
+    type Result = Schema[Ctx, Val]
+
+    def get(schema: Schema[Ctx, Val]) = schema
+  }
 }

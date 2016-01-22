@@ -10,8 +10,8 @@ import InputUnmarshaller.emptyMapVars
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Success, Failure, Try}
 
-case class Executor[Ctx, Root](
-    schema: Schema[Ctx, Root],
+case class Executor[Ctx, Root, S <: Schema[Ctx, Root]](
+    schema: S,
     root: Root = (),
     userContext: Ctx = (),
     queryValidator: QueryValidator = QueryValidator.default,
@@ -25,11 +25,11 @@ case class Executor[Ctx, Root](
   def execute[Input](
       queryAst: ast.Document,
       operationName: Option[String] = None,
-      variables: Input = emptyMapVars)(implicit marshaller: ResultMarshaller, um: InputUnmarshaller[Input]): Future[marshaller.Node] = {
+      variables: Input = emptyMapVars)(implicit marshaller: ResultMarshaller, um: InputUnmarshaller[Input], execResult: ExecutionResult[S]): execResult.Result[marshaller.Node] = {
     val violations = queryValidator.validateQuery(schema, queryAst)
 
     if (violations.nonEmpty)
-      Future.successful(new ResultResolver(marshaller, exceptionHandler).resolveError(ValidationError(violations)).asInstanceOf[marshaller.Node])
+      Future.successful(new ResultResolver(marshaller, exceptionHandler).resolveError(ValidationError(violations)).asInstanceOf[marshaller.Node]).asInstanceOf[execResult.Result[marshaller.Node]]
     else {                              
       val valueCollector = new ValueCollector[Ctx, Input](schema, variables, queryAst.sourceMapper, deprecationTracker, userContext)(um)
 
@@ -51,8 +51,8 @@ case class Executor[Ctx, Root](
       } yield res
 
       executionResult match {
-        case Success(future) ⇒ future
-        case Failure(error) ⇒ Future.successful(new ResultResolver(marshaller, exceptionHandler).resolveError(error).asInstanceOf[marshaller.Node])
+        case Success(future) ⇒ future.asInstanceOf[execResult.Result[marshaller.Node]]
+        case Failure(error) ⇒ Future.successful(new ResultResolver(marshaller, exceptionHandler).resolveError(error).asInstanceOf[marshaller.Node]).asInstanceOf[execResult.Result[marshaller.Node]]
       }
     }
   }
@@ -82,7 +82,7 @@ case class Executor[Ctx, Root](
       fields ← fieldCollector.collectFields(Vector.empty, tpe, Vector(operation))
     } yield {
       def doExecute(ctx: Ctx) = {
-        val middlewareCtx = MiddlewareQueryContext(ctx, this, queryAst, operationName, inputVariables, inputUnmarshaller)
+        val middlewareCtx = MiddlewareQueryContext(ctx, this.asInstanceOf[Executor[Ctx, Root, Schema[Ctx, Root]]], queryAst, operationName, inputVariables, inputUnmarshaller)
 
         val middlewareVal = middleware map (m ⇒ m.beforeQuery(middlewareCtx) → m)
 
@@ -240,8 +240,8 @@ case class Executor[Ctx, Root](
 }
 
 object Executor {
-  def execute[Ctx, Root, Input](
-    schema: Schema[Ctx, Root],
+  def execute[Ctx, Root, Input, S <: Schema[Ctx, Root]](
+    schema: S,
     queryAst: ast.Document,
     operationName: Option[String] = None,
     variables: Input = emptyMapVars,
@@ -254,8 +254,8 @@ object Executor {
     middleware: List[Middleware[Ctx]] = Nil,
     maxQueryDepth: Option[Int] = None,
     queryReducers: List[QueryReducer[Ctx, _]] = Nil
-  )(implicit executionContext: ExecutionContext, marshaller: ResultMarshaller, um: InputUnmarshaller[Input]): Future[marshaller.Node] =
-    Executor(schema, root, userContext, queryValidator, deferredResolver, exceptionHandler, deprecationTracker, middleware, maxQueryDepth, queryReducers).execute(queryAst, operationName, variables)
+  )(implicit executionContext: ExecutionContext, marshaller: ResultMarshaller, um: InputUnmarshaller[Input], execResult: ExecutionResult[S]): execResult.Result[marshaller.Node] =
+    Executor[Ctx, Root, S](schema, root, userContext, queryValidator, deferredResolver, exceptionHandler, deprecationTracker, middleware, maxQueryDepth, queryReducers).execute(queryAst, operationName, variables)
 }
 
 case class HandledException(message: String, additionalFields: Map[String, ResultMarshaller#Node] = Map.empty)

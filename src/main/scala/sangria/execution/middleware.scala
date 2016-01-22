@@ -5,7 +5,9 @@ import sangria.marshalling.InputUnmarshaller
 import language.{implicitConversions, existentials}
 
 import sangria.ast
-import sangria.schema.{Action, Context}
+import sangria.schema.{Schema, Action, Context}
+
+import scala.annotation.unchecked.uncheckedVariance
 
 
 trait Middleware[-Ctx] {
@@ -34,7 +36,7 @@ trait MiddlewareErrorField[Ctx] extends MiddlewareBeforeField[Ctx] {
 
 case class MiddlewareQueryContext[+Ctx, RootVal, Input](
   ctx: Ctx,
-  executor: Executor[_ <: Ctx, RootVal],
+  executor: Executor[Ctx, RootVal, Schema[Ctx, RootVal]] @uncheckedVariance,
   queryAst: ast.Document,
   operationName: Option[String],
   variables: Input,

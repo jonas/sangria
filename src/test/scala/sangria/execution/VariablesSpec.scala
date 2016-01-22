@@ -52,8 +52,14 @@ class VariablesSpec extends WordSpec with Matchers with GraphQlSupport {
         resolve = ctx ⇒ ctx.renderCoercedInputValueCompact(ctx.arg[Any]("input"), ListInputType(StringType), SJM))
     )
   })
+//
+  val foo = ObjectType.subs("AAAAA", fields[Unit, Unit](
+    Field.subs("aaaa", IntType, resolve = _ ⇒ 1)
+  ))
 
-  def schema = Schema(TestType)
+  val qqq = Schema(foo, Some(foo), Some(foo))
+
+  val schema = Schema(TestType)
 
   "Execute: Handles inputs" when {
     "Handles objects and nullability" when {
